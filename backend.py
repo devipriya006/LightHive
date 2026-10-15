@@ -11,6 +11,7 @@ from pydantic import BaseModel
 import json
 import numpy as np
 from feature1.audio_features import extract_audio_features, load_clap_model
+from feature3.audience_energy import AudienceEnergyAnalyzer
 from feature2.predict import predict_features
 from feature2.beat_detector import detect_beats
 import mediapipe as mp
@@ -35,14 +36,21 @@ app.add_middleware(
 CLAP_MODEL = None
 GESTURE_DETECTOR = None
 POSE_TRACKER = None
+AUDIENCE_ANALYZER = None
 
 
 @app.on_event("startup")
 def startup_event():
-    global CLAP_MODEL, GESTURE_DETECTOR, POSE_TRACKER
+    global CLAP_MODEL, GESTURE_DETECTOR, POSE_TRACKER,AUDIENCE_ANALYZER
 
     CLAP_MODEL = load_clap_model()
     GESTURE_DETECTOR = GestureDetector()
+    AUDIENCE_ANALYZER = AudienceEnergyAnalyzer(
+    model_path="yolo11n-pose.pt",
+    image_size=416,
+    max_people=10,
+    device="cpu",
+)
 
     POSE_TRACKER = mp.solutions.pose.Pose(
         static_image_mode=False,
@@ -363,5 +371,34 @@ async def detect_gesture(file: UploadFile = File(...)):
             status_code=500,
             detail=f"Gesture detection failed: {exc}",
         )
+
+@app.post("/analyze-audience")
+async def analyze_audience(file: UploadFile = File(...)):
+    if AUDIENCE_ANALYZER is None:
+        raise HTTPException(
+            status_code=503,
+            detail="Audience analyzer is not ready",
+        )
+
+    contents = await file.read()
+    image_array = np.frombuffer(contents, dtype=np.uint8)
+    frame = cv2.imdecode(image_array, cv2.IMREAD_COLOR)
+
+    if frame is None:
+        raise HTTPException(
+            status_code=400,
+            detail="Invalid image frame",
+        )
+
+    try:
+        _, payload = AUDIENCE_ANALYZER.update(frame)
+        return payload
+    except Exception as exc:
+        raise HTTPException(
+            status_code=500,
+            detail=f"Audience analysis failed: {exc}",
+        )
+    finally:
+        await file.close()
 
 
