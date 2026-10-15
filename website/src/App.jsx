@@ -1,5 +1,5 @@
 
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import "./App.css";
 
 export default function App() {
@@ -8,6 +8,19 @@ export default function App() {
   const [mood, setMood] = useState("ENERGETIC");
   const [track, setTrack] = useState(null);
   const [color, setColor] = useState("#8b5cf6");
+  const [cameraMode, setCameraMode] = useState("performer");
+const [cameraStatus, setCameraStatus] = useState("Camera off");
+const [cameraError, setCameraError] = useState("");
+const videoRef = useRef(null);
+const cameraStreamRef = useRef(null);
+const [detectedGesture, setDetectedGesture] = useState(null);
+const [gestureStatus, setGestureStatus] = useState("Waiting for camera");
+const [gestureEnabled, setGestureEnabled] = useState(false);
+const scanInProgress = useRef(false);
+const [poseLandmarks, setPoseLandmarks] = useState(null);
+const smoothedPoseRef = useRef(null);
+const [poseStatus, setPoseStatus] = useState("Pose tracking off");
+const poseScanInProgress = useRef(false);
   
 const [apiState, setApiState] = useState(null);
 const [apiStatus, setApiStatus] = useState("Checking");
@@ -89,6 +102,231 @@ setAudioStatus("AI lighting applied successfully!");
     setAudioStatus(error.message || "Could not analyse song");
   }
 };
+async function startCamera() {
+  setCameraError("");
+
+  if (!navigator.mediaDevices?.getUserMedia) {
+    setCameraError("Camera unavailable. Use localhost or HTTPS.");
+    return;
+  }
+
+  try {
+    const stream = await navigator.mediaDevices.getUserMedia({
+      video: true,
+      audio: false,
+    });
+
+    cameraStreamRef.current = stream;
+
+    if (videoRef.current) {
+      videoRef.current.srcObject = stream;
+      await videoRef.current.play();
+    }
+
+    setCameraStatus("Camera connected");
+  } catch (error) {
+    setCameraStatus("Camera off");
+    setCameraError(
+      error.name === "NotAllowedError"
+        ? "Camera permission denied. Allow camera access in your browser."
+        : "Could not start the camera. Check that it is connected."
+    );
+  }
+}
+
+function stopCamera() {
+  cameraStreamRef.current?.getTracks().forEach((track) => track.stop());
+  cameraStreamRef.current = null;
+
+  if (videoRef.current) {
+    videoRef.current.srcObject = null;
+  }
+
+  setCameraStatus("Camera off");
+}
+
+useEffect(() => {
+  return () => {
+    cameraStreamRef.current?.getTracks().forEach((track) => track.stop());
+  };
+}, []);
+async function analyzeGestureFrame() {
+  const video = videoRef.current;
+
+  if (!video || video.readyState < 2 || scanInProgress.current) {
+    return;
+  }
+
+  scanInProgress.current = true;
+
+  try {
+    const canvas = document.createElement("canvas");
+    canvas.width = video.videoWidth;
+    canvas.height = video.videoHeight;
+
+    canvas.getContext("2d").drawImage(video, 0, 0);
+
+    const blob = await new Promise((resolve) =>
+      canvas.toBlob(resolve, "image/jpeg", 0.7)
+    );
+
+    if (!blob) return;
+
+    const formData = new FormData();
+    formData.append("file", blob, "webcam.jpg");
+
+    const response = await fetch(
+      "http://127.0.0.1:8000/detect-gesture",
+      {
+        method: "POST",
+        body: formData,
+      }
+    );
+
+    const result = await response.json();
+
+    if (!response.ok) {
+      throw new Error(result.detail || "Gesture detection failed");
+    }
+
+    if (result.detected) {
+      setDetectedGesture(result.detected);
+      setGestureStatus("Gesture detected");
+    } else {
+      setGestureStatus("Scanning for gestures");
+    }
+  } catch (error) {
+    console.error("Gesture detection error:", error);
+    setGestureStatus(error.message || "Analysis error");
+  } finally {
+    scanInProgress.current = false;
+  }
+}
+async function analyzePoseFrame() {
+  const video = videoRef.current;
+
+  if (
+    !video ||
+    video.readyState < 2 ||
+    poseScanInProgress.current
+  ) {
+    return;
+  }
+
+  poseScanInProgress.current = true;
+
+  try {
+    const canvas = document.createElement("canvas");
+    canvas.width = video.videoWidth;
+    canvas.height = video.videoHeight;
+
+    canvas.getContext("2d").drawImage(video, 0, 0);
+
+    const blob = await new Promise((resolve) =>
+      canvas.toBlob(resolve, "image/jpeg", 0.7)
+    );
+
+    if (!blob) return;
+
+    const formData = new FormData();
+    formData.append("file", blob, "pose-frame.jpg");
+
+    const response = await fetch(
+      "http://127.0.0.1:8000/detect-pose",
+      {
+        method: "POST",
+        body: formData,
+      }
+    );
+
+    const result = await response.json();
+
+    if (!response.ok) {
+      throw new Error(result.detail || "Pose detection failed");
+    }
+
+    if (result.detected && result.landmarks) {
+      
+
+const previous = smoothedPoseRef.current;
+const alpha = 0.3;
+
+const smoothed = Object.fromEntries(
+  Object.entries(result.landmarks).map(([name, point]) => {
+    const old = previous?.[name];
+
+    return [
+      name,
+      {
+        x: old ? old.x + alpha * (point.x - old.x) : point.x,
+        y: old ? old.y + alpha * (point.y - old.y) : point.y,
+        visibility: point.visibility,
+      },
+    ];
+  })
+);
+
+smoothedPoseRef.current = smoothed;
+setPoseLandmarks(smoothed);
+      setPoseStatus("Body detected");
+    } else {
+      setPoseStatus("Looking for full body...");
+    }
+  } catch (error) {
+    console.error("Pose tracking error:", error);
+    setPoseStatus(error.message || "Pose tracking error");
+  } finally {
+    poseScanInProgress.current = false;
+  }
+}
+useEffect(() => {
+  if (cameraStatus !== "Camera connected") return;
+
+  let cancelled = false;
+  let timer;
+
+  const scan = async () => {
+    if (cancelled) return;
+
+    await analyzePoseFrame();
+
+    if (!cancelled) {
+      timer = setTimeout(scan, 150);
+    }
+  };
+
+  scan();
+
+  return () => {
+    cancelled = true;
+    clearTimeout(timer);
+  };
+}, [cameraStatus]);
+useEffect(() => {
+  if (!gestureEnabled || cameraStatus !== "Camera connected") {
+    return;
+  }
+
+  let cancelled = false;
+  let timer;
+
+  const scan = async () => {
+    if (cancelled) return;
+
+    await analyzeGestureFrame();
+
+    if (!cancelled) {
+      timer = setTimeout(scan, 250);
+    }
+  };
+
+  scan();
+
+  return () => {
+    cancelled = true;
+    clearTimeout(timer);
+  };
+}, [gestureEnabled, cameraStatus]);
 
 
 
@@ -292,15 +530,35 @@ setAudioStatus("AI lighting applied successfully!");
 
             <div className="ambient-glow" />
 
-            <div className="performer">
-              <div className="performer-head" />
-              <div className="performer-body" />
-              <div className="performer-arm left-arm" />
-              <div className="performer-arm right-arm" />
-              <div className="performer-leg left-leg" />
-              <div className="performer-leg right-leg" />
-            </div>
+<div
+  className="performer"
+  style={{
+    "--left-arm-angle": poseLandmarks
+      ? `${Math.atan2(
+          poseLandmarks.left_wrist.y -
+            poseLandmarks.left_shoulder.y,
+          poseLandmarks.left_wrist.x -
+            poseLandmarks.left_shoulder.x
+        ) * (180 / Math.PI) - 90}deg`
+      : "22deg",
 
+    "--right-arm-angle": poseLandmarks
+      ? `${Math.atan2(
+          poseLandmarks.right_wrist.y -
+            poseLandmarks.right_shoulder.y,
+          poseLandmarks.right_wrist.x -
+            poseLandmarks.right_shoulder.x
+        ) * (180 / Math.PI) - 90}deg`
+      : "-25deg",
+  }}
+>
+  <div className="performer-head" />
+  <div className="performer-body" />
+  <div className="performer-arm left-arm" />
+  <div className="performer-arm right-arm" />
+  <div className="performer-leg left-leg" />
+  <div className="performer-leg right-leg" />
+</div>
             <div className="platform platform-back" />
             <div className="platform platform-middle" />
             <div className="platform platform-front" />
@@ -317,7 +575,95 @@ setAudioStatus("AI lighting applied successfully!");
               <span className="center-line" />
             </div>
           </div>
+           <div className="camera-panel">
+  <div className="camera-heading">
+    <div>
+      <p className="eyebrow">CAMERA ANALYSIS</p>
+      <h3>Choose your mode</h3>
+    </div>
+    <span className="camera-status">{cameraStatus}</span>
+  </div>
 
+  <div className="camera-modes">
+    <button
+      className={`camera-mode ${
+        cameraMode === "performer" ? "selected" : ""
+      }`}
+      onClick={() => setCameraMode("performer")}
+    >
+      Performer Gesture
+    </button>
+
+    <button
+      className={`camera-mode ${
+        cameraMode === "audience" ? "selected" : ""
+      }`}
+      onClick={() => setCameraMode("audience")}
+    >
+      Audience Analysis
+    </button>
+  </div>
+
+  <div className="camera-preview">
+    <video ref={videoRef} autoPlay muted playsInline />
+    {!cameraStreamRef.current && (
+      <p>Camera preview will appear here</p>
+    )}
+  </div>
+
+  <div className="camera-actions">
+    <button className="camera-action" onClick={startCamera}>
+      Start Camera
+    </button>
+    <button className="camera-action" onClick={stopCamera}>
+      Stop Camera
+    </button>
+  </div>
+  
+<div className="camera-actions">
+  <button
+    className="camera-action"
+    disabled={cameraStatus !== "Camera connected"}
+    onClick={() => {
+      setGestureEnabled((enabled) => !enabled);
+      setGestureStatus(
+        gestureEnabled ? "Detection stopped" : "Starting detection..."
+      );
+    }}
+  >
+    {gestureEnabled ? "Stop Detection" : "Start Detection"}
+  </button>
+</div>
+
+<p className="camera-description">
+  Detection status: {gestureStatus}
+</p>
+
+<p className="camera-description">
+  Pose tracking: {poseStatus}
+</p>
+
+
+<p className="camera-description">
+  Latest gesture: {detectedGesture?.event || "None detected yet"}
+</p>
+
+{detectedGesture?.direction && (
+  <p className="camera-description">
+    Spotlight direction: X {detectedGesture.direction.x}, Y{" "}
+    {detectedGesture.direction.y}
+  </p>
+)}
+
+
+  <p className="camera-description">
+    {cameraMode === "performer"
+      ? "Performer mode selected. Gesture recognition will be connected next."
+      : "Audience mode selected. Audience-energy analysis will be connected next."}
+  </p>
+
+  {cameraError && <p className="camera-error">{cameraError}</p>}
+</div>
           <div className="metrics-grid">
             <article className="metric-card">
               <span className="metric-label">LIGHTING ENGINE</span>

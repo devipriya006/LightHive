@@ -197,12 +197,48 @@ button { cursor: pointer; }
 }
 .performer-head { position: absolute; top: 0; left: 34px; width: 23px; height: 27px; border-radius: 45% 45% 40% 40%; background: #171722; border: 1px solid #6c5b87; }
 .performer-body { position: absolute; top: 27px; left: 22px; width: 46px; height: 64px; background: linear-gradient(110deg, #292439, #11111a); border: 1px solid #65557b; clip-path: polygon(20% 0, 80% 0, 100% 100%, 0 100%); }
-.performer-arm { position: absolute; top: 34px; width: 13px; height: 66px; border-radius: 9px; background: #272236; border: 1px solid #65557b; }
-.left-arm { left: 14px; transform: rotate(22deg); }
-.right-arm { right: 14px; transform: rotate(-25deg); }
+
+
+
+.performer-arm {
+  position: absolute;
+  top: 34px;
+  width: 13px;
+  height: 66px;
+  border-radius: 9px;
+  background: #272236;
+  border: 1px solid #65557b;
+  transform-origin: top center;
+}
+
+.left-arm {
+  left: 14px;
+  transform: rotate(var(--left-arm-angle, 22deg));
+}
+
+.right-arm {
+  right: 14px;
+  transform: rotate(var(--right-arm-angle, -25deg));
+}
+
+
+
+
+
 .performer-leg { position: absolute; top: 85px; width: 17px; height: 77px; background: #181723; border: 1px solid #4e435e; border-radius: 0 0 5px 5px; }
-.left-leg { left: 26px; transform: rotate(5deg); }
-.right-leg { right: 26px; transform: rotate(-5deg); }
+
+.left-leg {
+  left: 26px;
+  transform-origin: top center;
+  transform: rotate(var(--left-leg-angle, 5deg));
+}
+
+.right-leg {
+  right: 26px;
+  transform-origin: top center;
+  transform: rotate(var(--right-leg-angle, -5deg));
+}
+
 
 .platform { position: absolute; left: 50%; transform: translateX(-50%); clip-path: polygon(12% 0, 88% 0, 100% 100%, 0 100%); }
 .platform-back { bottom: 22%; width: 44%; height: 30px; background: #302744; border: 1px solid #79629a; }
@@ -258,4 +294,128 @@ button { cursor: pointer; }
   .metrics-grid { gap: 8px; }
   .metric-card { padding: 12px 10px; }
   .stage-footer { font-size: 8px; }
+}
+.camera-panel {
+  margin-top: 22px;
+  padding: 20px;
+  background: #0e0f19;
+  border: 1px solid #292337;
+  border-radius: 10px;
+}
+
+.camera-heading {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+
+.camera-heading h3 {
+  margin: 0;
+  font-size: 18px;
+}
+
+.camera-status {
+  color: #a78bfa;
+  font-size: 11px;
+}
+
+.camera-modes {
+  display: flex;
+  gap: 10px;
+  margin: 18px 0 14px;
+}
+
+.camera-mode,
+.camera-action {
+  padding: 10px 14px;
+  color: #b9b8cc;
+  background: #151622;
+  border: 1px solid #303044;
+  border-radius: 6px;
+  font-size: 11px;
+}
+
+.camera-mode.selected {
+  color: white;
+  border-color: #8b5cf6;
+  background: #29203f;
+}
+
+.camera-preview {
+  position: relative;
+  min-height: 240px;
+  background: #080910;
+  border: 1px solid #292337;
+  border-radius: 8px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  overflow: hidden;
+}
+
+.camera-preview video {
+  display: block;
+  width: 100%;
+  max-height: 380px;
+  object-fit: contain;
+}
+
+.camera-preview p {
+  position: absolute;
+  color: #85869b;
+  font-size: 12px;
+  pointer-events: none;
+}
+
+.camera-actions {
+  display: flex;
+  gap: 10px;
+  margin-top: 12px;
+}
+
+.camera-action:hover,
+.camera-mode:hover {
+  border-color: #8b5cf6;
+}
+
+.camera-description,
+.camera-error {
+  font-size: 11px;
+  line-height: 1.7;
+  margin-top: 12px;
+}
+
+.camera-description {
+  color: #85869b;
+}
+
+.camera-error {
+  color: #fb7185;
+}
+
+@media (max-width: 500px) {
+  .camera-modes {
+    flex-direction: column;
+  }
+}
+
+/* Keep the arm segments connected at the elbow */
+.performer-arm {
+  border-radius: 9px;
+  transform-origin: 50% 0%;
+  will-change: transform;
+}
+
+.performer-forearm {
+  border-radius: 9px;
+  transform-origin: 50% 0%;
+  will-change: transform;
+}
+
+/* Keep the forearm attached to the upper arm */
+.performer-forearm {
+  top: 30px;
+  left: -1px;
 }

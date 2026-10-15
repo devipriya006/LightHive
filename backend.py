@@ -1,7 +1,8 @@
 ﻿import os
 import tempfile
 import librosa
-
+import cv2
+from feature4.gesture_detector import GestureDetector
 from pathlib import Path
 from fastapi import UploadFile, File, HTTPException
 from fastapi import FastAPI
@@ -11,6 +12,9 @@ import json
 import numpy as np
 from feature1.audio_features import extract_audio_features, load_clap_model
 from feature2.predict import predict_features
+from feature2.beat_detector import detect_beats
+import mediapipe as mp
+
 from feature2.lighting_mapper import (
     create_lighting_state,
     lighting_state_to_dict,
@@ -27,12 +31,27 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
 CLAP_MODEL = None
+GESTURE_DETECTOR = None
+POSE_TRACKER = None
+
 
 @app.on_event("startup")
 def startup_event():
-    global CLAP_MODEL
+    global CLAP_MODEL, GESTURE_DETECTOR, POSE_TRACKER
+
     CLAP_MODEL = load_clap_model()
+    GESTURE_DETECTOR = GestureDetector()
+
+    POSE_TRACKER = mp.solutions.pose.Pose(
+        static_image_mode=False,
+        model_complexity=0,
+        smooth_landmarks=True,
+        min_detection_confidence=0.5,
+        min_tracking_confidence=0.5,
+    )
+
 
 class LightingInput(BaseModel):
     valence: float = 0.0
@@ -176,6 +195,88 @@ async def predict_lighting(file: UploadFile = File(...)):
             os.remove(temp_path)
         await file.close()
 
+@app.post("/detect-beats")
+async def detect_beats_endpoint(file: UploadFile = File(...)):
+    suffix = Path(file.filename or "audio.wav").suffix or ".wav"
+    temp_path = None
+
+    try:
+        with tempfile.NamedTemporaryFile(delete=False, suffix=suffix) as temp_file:
+            temp_file.write(await file.read())
+            temp_path = Path(temp_file.name)
+
+        result = detect_beats(temp_path)
+        return result
+
+    except (ValueError, FileNotFoundError) as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
+
+    finally:
+        if temp_path is not None:
+            temp_path.unlink(missing_ok=True)
+@app.post("/detect-pose")
+async def detect_pose(file: UploadFile = File(...)):
+    if POSE_TRACKER is None:
+        raise HTTPException(
+            status_code=503,
+            detail="Pose tracker is not ready",
+        )
+
+    contents = await file.read()
+    image_array = np.frombuffer(contents, dtype=np.uint8)
+    frame = cv2.imdecode(image_array, cv2.IMREAD_COLOR)
+
+    if frame is None:
+        raise HTTPException(
+            status_code=400,
+            detail="Invalid image frame",
+        )
+
+    try:
+        rgb_frame = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
+        result = POSE_TRACKER.process(rgb_frame)
+
+        if not result.pose_landmarks:
+            return {"detected": False, "landmarks": None}
+
+        landmarks = result.pose_landmarks.landmark
+
+        joint_names = {
+            "left_shoulder": 11,
+            "right_shoulder": 12,
+            "left_elbow": 13,
+            "right_elbow": 14,
+            "left_wrist": 15,
+            "right_wrist": 16,
+            "left_hip": 23,
+            "right_hip": 24,
+            "left_knee": 25,
+            "right_knee": 26,
+            "left_ankle": 27,
+            "right_ankle": 28,
+        }
+
+        points = {}
+
+        for name, index in joint_names.items():
+            point = landmarks[index]
+            points[name] = {
+                "x": round(float(point.x), 4),
+                "y": round(float(point.y), 4),
+                "visibility": round(float(point.visibility), 4),
+            }
+
+        return {
+            "detected": True,
+            "landmarks": points,
+        }
+
+    except Exception as exc:
+        raise HTTPException(
+            status_code=500,
+            detail=f"Pose detection failed: {exc}",
+        )
+
 
 @app.post("/analyze")
 async def analyze_audio(file: UploadFile = File(...)):
@@ -235,4 +336,32 @@ async def analyze_audio(file: UploadFile = File(...)):
         if temp_path and os.path.exists(temp_path):
             os.remove(temp_path)
         await file.close()
+        
+@app.post("/detect-gesture")
+async def detect_gesture(file: UploadFile = File(...)):
+    if GESTURE_DETECTOR is None:
+        raise HTTPException(
+            status_code=503,
+            detail="Gesture detector is not ready",
+        )
+
+    contents = await file.read()
+    image_array = np.frombuffer(contents, dtype=np.uint8)
+    frame = cv2.imdecode(image_array, cv2.IMREAD_COLOR)
+
+    if frame is None:
+        raise HTTPException(
+            status_code=400,
+            detail="Invalid image frame",
+        )
+
+    try:
+        event = GESTURE_DETECTOR.detect(frame)
+        return {"detected": event}
+    except Exception as exc:
+        raise HTTPException(
+            status_code=500,
+            detail=f"Gesture detection failed: {exc}",
+        )
+
 
