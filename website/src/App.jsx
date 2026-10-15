@@ -4,6 +4,9 @@ import "./App.css";
 
 export default function App() {
   const [playing, setPlaying] = useState(false);
+  const [beatData, setBeatData] = useState(null);
+  const audioRef = useRef(null);
+const [beatPulse, setBeatPulse] = useState(false);
   const [intensity, setIntensity] = useState(70);
   const [mood, setMood] = useState("ENERGETIC");
   const [track, setTrack] = useState(null);
@@ -56,12 +59,35 @@ const handleUpload = async (event) => {
   if (!file) return;
 
   setTrack(file);
+  setBeatData(null);
   setAudioStatus("Analysing song...");
 
-  try {
-    const formData = new FormData();
-    formData.append("file", file);
+  const formData = new FormData();
+  formData.append("file", file);
 
+  // Run beat detection separately from lighting prediction
+  const beatPromise = fetch(
+    "http://127.0.0.1:8000/detect-beats",
+    {
+      method: "POST",
+      body: formData,
+    }
+  )
+    .then(async (response) => {
+      const result = await response.json();
+
+      if (!response.ok) {
+        throw new Error(result.detail || "Beat detection failed");
+      }
+
+      setBeatData(result);
+      console.log("Beat detection result:", result);
+    })
+    .catch((error) => {
+      console.error("Beat detection error:", error);
+    });
+
+  try {
     const response = await fetch(
       "http://127.0.0.1:8000/predict-lighting",
       {
@@ -79,29 +105,31 @@ const handleUpload = async (event) => {
     const rgb = result.lighting.rgb;
     const predictedColor = `rgb(${rgb.r}, ${rgb.g}, ${rgb.b})`;
 
-   
-setColor(predictedColor);
-setApiState(result.lighting);
-setIntensity(
-  Math.round((result.lighting.brightness ?? 0.6) * 100)
-);
+    setColor(predictedColor);
+    setApiState(result.lighting);
+    setIntensity(
+      Math.round((result.lighting.brightness ?? 0.6) * 100)
+    );
 
-const predictedMood =
-  result.valence > 0.35
-    ? "ENERGETIC"
-    : result.valence < -0.35
-      ? "DREAMY"
-      : "CALM";
+    const predictedMood =
+      result.valence > 0.35
+        ? "ENERGETIC"
+        : result.valence < -0.35
+          ? "DREAMY"
+          : "CALM";
 
-setMood(predictedMood);
-setAudioAnalysis(result);
-setAudioStatus("AI lighting applied successfully!");
+    setMood(predictedMood);
+    setAudioAnalysis(result);
+    setAudioStatus("AI lighting applied successfully!");
 
   } catch (error) {
     console.error("Lighting prediction error:", error);
     setAudioStatus(error.message || "Could not analyse song");
   }
+
+  await beatPromise;
 };
+
 async function startCamera() {
   setCameraError("");
 
@@ -368,15 +396,44 @@ useEffect(() => {
               />
             </label>
 
-            {track && (
-              <audio
-                className="audio-player"
-                controls
-                src={URL.createObjectURL(track)}
-                onPlay={() => setPlaying(true)}
-                onPause={() => setPlaying(false)}
-              />
-            )}
+        
+{track && (
+  <audio
+    ref={audioRef}
+    className="audio-player"
+    controls
+    src={URL.createObjectURL(track)}
+    onPlay={() => setPlaying(true)}
+    onPause={() => {
+      setPlaying(false);
+      setBeatPulse(false);
+    }}
+    onEnded={() => {
+      setPlaying(false);
+      setBeatPulse(false);
+    }}
+ 
+onTimeUpdate={(event) => {
+  const beats = beatData?.beat_times_seconds;
+  if (!beats?.length) return;
+
+  const currentTime = event.currentTarget.currentTime;
+  const interval = beatData.estimated_beat_interval_seconds || 0.5;
+
+  const nearestBeat = beats.reduce(
+    (nearest, beat) =>
+      Math.abs(beat - currentTime) < Math.abs(nearest - currentTime)
+        ? beat
+        : nearest,
+    beats[0]
+  );
+
+  setBeatPulse(Math.abs(nearestBeat - currentTime) < interval * 0.25);
+}}
+
+  />
+)}
+
             
 {audioStatus && (
   <div className="sidebar-footnote">
@@ -494,7 +551,9 @@ useEffect(() => {
           </div>
 
           <div
-            className={`concert-stage ${playing ? "is-playing" : ""}`}
+            className={`concert-stage ${playing ? "is-playing" : ""} ${
+  beatPulse ? "beat-pulse" : ""
+}`}
             style={{
               "--stage-color": color,
               "--stage-intensity": intensity / 100,

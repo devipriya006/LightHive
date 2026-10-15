@@ -419,3 +419,33 @@ button { cursor: pointer; }
   top: 30px;
   left: -1px;
 }
+
+.concert-stage.beat-pulse .ambient-glow {
+  opacity: 1;
+  filter: brightness(1.8);
+  transform: scale(1.08);
+}
+
+.concert-stage .ambient-glow {
+  transition:
+    opacity 80ms ease,
+    filter 80ms ease,
+    transform 80ms ease;
+}
+
+.concert-stage.beat-pulse .ambient-glow {
+  opacity: 1 !important;
+  filter: brightness(3) saturate(1.8);
+  transform: scale(1.2);
+}
+
+.concert-stage.beat-pulse .light-beam {
+  opacity: 1 !important;
+  filter: brightness(2.5);
+}
+
+.concert-stage .ambient-glow,
+.concert-stage .light-beam {
+  transition: filter 70ms ease, opacity 70ms ease, transform 70ms ease;
+}
+
