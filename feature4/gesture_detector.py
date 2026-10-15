@@ -126,12 +126,12 @@ class GestureDetector:
 
         left_level = (
             abs(left_wrist.y - left_shoulder.y)
-            < shoulder_width * 0.90
+           < shoulder_width * 1.20
         )
         right_level = (
-            abs(right_wrist.y - right_shoulder.y)
-            < shoulder_width * 0.90
-        )
+           abs(right_wrist.y - right_shoulder.y)
+           < shoulder_width * 1.20
+       )
 
         arms_spread = (
             left_dx > shoulder_width * 0.90
@@ -227,7 +227,7 @@ class GestureDetector:
 
                 if (
                     category.category_name == "Open_Palm"
-                    and category.score >= 0.70
+                    and category.score >= 0.50
                 ):
                     open_palm = True
                     break

@@ -449,3 +449,70 @@ button { cursor: pointer; }
   transition: filter 70ms ease, opacity 70ms ease, transform 70ms ease;
 }
 
+/* Pause automatic visual animations without pausing music */
+.concert-stage.auto-lighting-paused .light-beam,
+.concert-stage.auto-lighting-paused .ambient-glow,
+.concert-stage.auto-lighting-paused .performer {
+  animation-play-state: paused !important;
+}
+
+/* CLIMAX: dramatic white stage flash */
+.concert-stage.gesture-climax {
+  --stage-color: #ffffff;
+}
+
+.concert-stage.gesture-climax .ambient-glow {
+  opacity: 1 !important;
+  filter: brightness(3) blur(65px);
+}
+
+.concert-stage.gesture-climax .light-beam {
+  opacity: 1 !important;
+  filter: brightness(2.5);
+}
+
+/* FULL STAGE REVEAL: brighten all stage beams */
+.concert-stage.gesture-full-reveal .light-beam {
+  opacity: 1 !important;
+  filter: brightness(2.2) saturate(1.5);
+}
+
+.concert-stage.gesture-full-reveal .ambient-glow {
+  opacity: 1 !important;
+  transform: scale(1.25);
+}
+
+/* Spotlight direction: point the beams toward the selected direction */
+.concert-stage .light-beam {
+  transition: filter 100ms ease, opacity 100ms ease, transform 100ms ease;
+}
+
+.concert-stage .beam-1 {
+  --beam-direction: calc((var(--spotlight-x) - 0.5) * 50deg);
+  transform: rotate(calc(-25deg + var(--beam-direction)));
+}
+
+.concert-stage .beam-2 {
+  transform: rotate(calc(-17deg + (var(--spotlight-x) - 0.5) * 35deg));
+}
+
+.concert-stage .beam-3 {
+  transform: rotate(calc(-9deg + (var(--spotlight-x) - 0.5) * 20deg));
+}
+
+.concert-stage .beam-4 {
+  transform: rotate(calc((var(--spotlight-x) - 0.5) * 10deg));
+}
+
+.concert-stage .beam-5 {
+  transform: rotate(calc(9deg + (var(--spotlight-x) - 0.5) * 20deg));
+}
+
+.concert-stage .beam-6 {
+  transform: rotate(calc(17deg + (var(--spotlight-x) - 0.5) * 35deg));
+}
+
+.concert-stage .beam-7 {
+  transform: rotate(calc(25deg + (var(--spotlight-x) - 0.5) * 50deg));
+}
+

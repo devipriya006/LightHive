@@ -17,6 +17,11 @@ const [cameraError, setCameraError] = useState("");
 const videoRef = useRef(null);
 const cameraStreamRef = useRef(null);
 const [detectedGesture, setDetectedGesture] = useState(null);
+const [gestureAction, setGestureAction] = useState("Waiting for gesture");
+const [spotlightDirection, setSpotlightDirection] = useState(null);
+const [autoLightingPaused, setAutoLightingPaused] = useState(false);
+const [climaxActive, setClimaxActive] = useState(false);
+const [fullRevealActive, setFullRevealActive] = useState(false);
 const [gestureStatus, setGestureStatus] = useState("Waiting for camera");
 const [gestureEnabled, setGestureEnabled] = useState(false);
 const scanInProgress = useRef(false);
@@ -27,6 +32,10 @@ const poseScanInProgress = useRef(false);
   
 const [apiState, setApiState] = useState(null);
 const [apiStatus, setApiStatus] = useState("Checking");
+const [audienceData, setAudienceData] = useState(null);
+const [audienceStatus, setAudienceStatus] = useState("Waiting for camera");
+const audienceScanInProgress = useRef(false);
+
 
 async function fetchLightingState() {
   try {
@@ -216,13 +225,48 @@ async function analyzeGestureFrame() {
     if (!response.ok) {
       throw new Error(result.detail || "Gesture detection failed");
     }
+    
 
-    if (result.detected) {
-      setDetectedGesture(result.detected);
-      setGestureStatus("Gesture detected");
-    } else {
-      setGestureStatus("Scanning for gestures");
-    }
+
+
+
+if (result.detected) {
+  const gesture = result.detected;
+  const eventName =
+    typeof gesture === "string" ? gesture : gesture.event;
+
+  setDetectedGesture(gesture);
+  setGestureStatus("Gesture detected");
+
+  if (eventName === "PAUSE_AUTO") {
+    setAutoLightingPaused(true);
+    setGestureAction("Automatic lighting paused");
+    setClimaxActive(false);
+    setFullRevealActive(false);
+  } else if (eventName === "CLIMAX") {
+    setAutoLightingPaused(false);
+    setClimaxActive(true);
+    setFullRevealActive(false);
+    setColor("#ffffff");
+    setIntensity(100);
+    setGestureAction("CLIMAX: Dramatic stage flash");
+  } else if (eventName === "FULL_STAGE_REVEAL") {
+    setAutoLightingPaused(false);
+    setClimaxActive(false);
+    setFullRevealActive(true);
+    setIntensity(100);
+    setGestureAction("FULL STAGE REVEAL: All beams active");
+  } else if (eventName === "SPOTLIGHT_DIRECTION") {
+    setSpotlightDirection(gesture.direction || null);
+    setGestureAction("SPOTLIGHT: Direction updated");
+  } else {
+    setGestureAction(`Gesture detected: ${eventName || "Unknown"}`);
+  }
+} else {
+  setGestureStatus("Scanning for gestures");
+}
+
+
   } catch (error) {
     console.error("Gesture detection error:", error);
     setGestureStatus(error.message || "Analysis error");
@@ -230,6 +274,64 @@ async function analyzeGestureFrame() {
     scanInProgress.current = false;
   }
 }
+
+async function analyzeAudienceFrame() {
+  const video = videoRef.current;
+
+  if (
+    cameraMode !== "audience" ||
+    !video ||
+    video.readyState < 2 ||
+    audienceScanInProgress.current
+  ) {
+    return;
+  }
+
+  audienceScanInProgress.current = true;
+
+  try {
+    const canvas = document.createElement("canvas");
+    canvas.width = video.videoWidth;
+    canvas.height = video.videoHeight;
+
+    const context = canvas.getContext("2d");
+    if (!context) return;
+
+    context.drawImage(video, 0, 0);
+
+    const blob = await new Promise((resolve) =>
+      canvas.toBlob(resolve, "image/jpeg", 0.6)
+    );
+
+    if (!blob) return;
+
+    const formData = new FormData();
+    formData.append("file", blob, "audience.jpg");
+
+    const response = await fetch(
+      "http://127.0.0.1:8000/analyze-audience",
+      {
+        method: "POST",
+        body: formData,
+      }
+    );
+
+    const result = await response.json();
+
+    if (!response.ok) {
+      throw new Error(result.detail || "Audience analysis failed");
+    }
+
+    setAudienceData(result);
+    setAudienceStatus("Audience analysis active");
+  } catch (error) {
+    console.error("Audience analysis error:", error);
+    setAudienceStatus(error.message || "Audience analysis failed");
+  } finally {
+    audienceScanInProgress.current = false;
+  }
+}
+
 async function analyzePoseFrame() {
   const video = videoRef.current;
 
@@ -355,6 +457,34 @@ useEffect(() => {
     clearTimeout(timer);
   };
 }, [gestureEnabled, cameraStatus]);
+useEffect(() => {
+  if (
+    cameraMode !== "audience" ||
+    cameraStatus !== "Camera connected"
+  ) {
+    return;
+  }
+
+  let cancelled = false;
+  let timer;
+
+  const scan = async () => {
+    if (cancelled) return;
+
+    await analyzeAudienceFrame();
+
+    if (!cancelled) {
+      timer = setTimeout(scan, 1000);
+    }
+  };
+
+  scan();
+
+  return () => {
+    cancelled = true;
+    clearTimeout(timer);
+  };
+}, [cameraMode, cameraStatus]);
 
 
 
@@ -550,15 +680,21 @@ onTimeUpdate={(event) => {
             </div>
           </div>
 
-          <div
-            className={`concert-stage ${playing ? "is-playing" : ""} ${
-  beatPulse ? "beat-pulse" : ""
-}`}
-            style={{
-              "--stage-color": color,
-              "--stage-intensity": intensity / 100,
-            }}
-          >
+         
+<div
+  className={`concert-stage ${playing ? "is-playing" : ""} ${
+    beatPulse ? "beat-pulse" : ""
+  } ${climaxActive ? "gesture-climax" : ""} ${
+    fullRevealActive ? "gesture-full-reveal" : ""
+  } ${autoLightingPaused ? "auto-lighting-paused" : ""}`}
+  style={{
+    "--stage-color": color,
+    "--stage-intensity": intensity / 100,
+    "--spotlight-x": `${spotlightDirection?.x ?? 0.5}`,
+    "--spotlight-y": `${spotlightDirection?.y ?? 0.5}`,
+  }}
+>
+
             <div className="stage-grid" />
             <div className="stage-stars">
               {Array.from({ length: 35 }, (_, i) => (
@@ -706,6 +842,9 @@ onTimeUpdate={(event) => {
 <p className="camera-description">
   Latest gesture: {detectedGesture?.event || "None detected yet"}
 </p>
+<p className="camera-description">
+  Lighting action: {gestureAction}
+</p>
 
 {detectedGesture?.direction && (
   <p className="camera-description">
@@ -715,11 +854,12 @@ onTimeUpdate={(event) => {
 )}
 
 
-  <p className="camera-description">
-    {cameraMode === "performer"
-      ? "Performer mode selected. Gesture recognition will be connected next."
-      : "Audience mode selected. Audience-energy analysis will be connected next."}
-  </p>
+ 
+<p className="camera-description">
+  {cameraMode === "performer"
+    ? "Performer mode selected."
+    : `Audience analysis: ${audienceStatus}`}
+</p>
 
   {cameraError && <p className="camera-error">{cameraError}</p>}
 </div>
@@ -750,11 +890,22 @@ onTimeUpdate={(event) => {
               <span className="metric-note">RGB visual simulation</span>
             </article>
 
-            <article className="metric-card">
-              <span className="metric-label">AUDIENCE ENERGY</span>
-              <strong className="metric-value">—</strong>
-              <span className="metric-note">Awaiting camera integration</span>
-            </article>
+<article className="metric-card">
+  <span className="metric-label">AUDIENCE ENERGY</span>
+
+  <strong className="metric-value">
+    {audienceData
+      ? Math.round(audienceData.audience_energy)
+      : "—"}
+  </strong>
+
+  <span className="metric-note">
+    {audienceData
+      ? `${audienceData.activity_level} activity · ${audienceData.person_count} people`
+      : audienceStatus}
+  </span>
+</article>
+
 
             <article className="metric-card">
               <span className="metric-label">BEAT SYNC</span>
