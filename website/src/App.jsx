@@ -6,11 +6,13 @@ export default function App() {
   const [playing, setPlaying] = useState(false);
   const [beatData, setBeatData] = useState(null);
   const audioRef = useRef(null);
+const lastBeatIndexRef = useRef(-1);
 const [beatPulse, setBeatPulse] = useState(false);
   const [intensity, setIntensity] = useState(70);
   const [mood, setMood] = useState("ENERGETIC");
-  const [track, setTrack] = useState(null);
-  const [color, setColor] = useState("#8b5cf6");
+ const [track, setTrack] = useState(null);
+const [audioUrl, setAudioUrl] = useState("");
+const [color, setColor] = useState("#8b5cf6");
   const [cameraMode, setCameraMode] = useState("performer");
 const [cameraStatus, setCameraStatus] = useState("Camera off");
 const [cameraError, setCameraError] = useState("");
@@ -60,6 +62,19 @@ async function fetchLightingState() {
   
 const [audioAnalysis, setAudioAnalysis] = useState(null);
 const [audioStatus, setAudioStatus] = useState("No song analyzed");
+useEffect(() => {
+  if (!track) {
+    setAudioUrl("");
+    return;
+  }
+
+  const url = URL.createObjectURL(track);
+  setAudioUrl(url);
+
+  return () => {
+    URL.revokeObjectURL(url);
+  };
+}, [track]);
 
 
 
@@ -67,9 +82,14 @@ const handleUpload = async (event) => {
   const file = event.target.files?.[0];
   if (!file) return;
 
-  setTrack(file);
-  setBeatData(null);
-  setAudioStatus("Analysing song...");
+ audioRef.current?.pause();
+ lastBeatIndexRef.current = -1;
+setPlaying(false);
+setBeatPulse(false);
+setTrack(file);
+setBeatData(null);
+setAudioAnalysis(null);
+setAudioStatus("Analysing song...");
 
   const formData = new FormData();
   formData.append("file", file);
@@ -485,9 +505,55 @@ useEffect(() => {
     clearTimeout(timer);
   };
 }, [cameraMode, cameraStatus]);
+useEffect(() => {
+  if (cameraMode !== "audience" || !audienceData) return;
+  if (autoLightingPaused || climaxActive) return;
+
+  const energy = Number(audienceData.audience_energy);
+  if (!Number.isFinite(energy)) return;
+
+  // Adjust these thresholds if your analyzer uses a different scale.
+  if (energy >= 70) {
+    setColor("#ff4d8d");
+    setIntensity(95);
+    setMood("INTENSE");
+  } else if (energy >= 40) {
+    setColor("#f59e0b");
+    setIntensity(75);
+    setMood("ENERGETIC");
+  } else {
+    setColor("#38bdf8");
+    setIntensity(40);
+    setMood("CALM");
+  }
+}, [
+  audienceData,
+  cameraMode,
+  autoLightingPaused,
+  climaxActive,
+]);
 
 
+async function togglePlayback() {
+  const audio = audioRef.current;
 
+  if (!audio || !track) {
+    setAudioStatus("Upload a song first.");
+    return;
+  }
+
+  if (audio.paused) {
+    try {
+      await audio.play();
+    } catch (error) {
+      setAudioStatus(
+        "Playback was blocked. Press Play in the audio player."
+      );
+    }
+  } else {
+    audio.pause();
+  }
+}
   return (
     <main className="app-shell">
       <header className="topbar">
@@ -526,13 +592,12 @@ useEffect(() => {
               />
             </label>
 
-        
-{track && (
+{track && audioUrl && (
   <audio
     ref={audioRef}
     className="audio-player"
     controls
-    src={URL.createObjectURL(track)}
+    src={audioUrl}
     onPlay={() => setPlaying(true)}
     onPause={() => {
       setPlaying(false);
@@ -542,35 +607,45 @@ useEffect(() => {
       setPlaying(false);
       setBeatPulse(false);
     }}
- 
-onTimeUpdate={(event) => {
-  const beats = beatData?.beat_times_seconds;
-  if (!beats?.length) return;
+    onTimeUpdate={(event) => {
+      const beats = beatData?.beat_times_seconds;
 
-  const currentTime = event.currentTarget.currentTime;
-  const interval = beatData.estimated_beat_interval_seconds || 0.5;
+      if (!beats?.length) {
+        setBeatPulse(false);
+        return;
+      }
 
-  const nearestBeat = beats.reduce(
-    (nearest, beat) =>
-      Math.abs(beat - currentTime) < Math.abs(nearest - currentTime)
-        ? beat
-        : nearest,
-    beats[0]
-  );
+      const currentTime = event.currentTarget.currentTime;
+      let beatIndex = -1;
 
-  setBeatPulse(Math.abs(nearestBeat - currentTime) < interval * 0.25);
-}}
+      for (let i = 0; i < beats.length; i++) {
+        if (beats[i] <= currentTime) {
+          beatIndex = i;
+        } else {
+          break;
+        }
+      }
 
+      if (beatIndex === -1) {
+        setBeatPulse(false);
+        return;
+      }
+
+      const interval =
+        beatData?.estimated_beat_interval_seconds || 0.5;
+
+      setBeatPulse(
+        currentTime - beats[beatIndex] < interval * 0.3
+      );
+    }}
   />
 )}
 
-            
 {audioStatus && (
   <div className="sidebar-footnote">
     {audioStatus}
   </div>
 )}
-
 
 {audioAnalysis && (
   <div className="control-section">
@@ -644,19 +719,14 @@ onTimeUpdate={(event) => {
           </div>
 
           <button
-            className="launch-button"
-            onClick={() => setPlaying(!playing)}
-          >
-            {playing ? "Ⅱ  PAUSE VISUALS" : "▶  LAUNCH VISUALS"}
-          </button>
-          
-<button
   className="launch-button"
-  style={{ marginTop: 10, background: "#25233a" }}
-  onClick={fetchLightingState}
+  onClick={togglePlayback}
+  disabled={!track}
 >
-  ↻ SYNC WITH PYTHON
+  {playing ? "Ⅱ  PAUSE SONG & VISUALS" : "▶  PLAY SONG & VISUALS"}
 </button>
+
+
 
 <p className="sidebar-footnote">
   Python API: {apiStatus}
