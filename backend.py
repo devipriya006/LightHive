@@ -148,6 +148,9 @@ def build_model_features(audio_path):
         else:
             values[key] = float(value)
 
+    if CLAP_MODEL is None:
+        raise RuntimeError("CLAP model is not initialized")
+
     embedding = CLAP_MODEL.get_audio_embedding_from_filelist(
         x=[str(audio_path)],
         use_tensor=False,
@@ -211,8 +214,8 @@ async def predict_lighting(file: UploadFile = File(...)):
         features = build_model_features(temp_path)
         prediction = predict_features(features)
 
-        valence = prediction["valence_mean"]
-        arousal = prediction["arousal_mean"]
+        valence = float(prediction["valence_mean"])
+        arousal = float(prediction["arousal_mean"])
 
         state = lighting_state_to_dict(
             create_lighting_state(valence, arousal)
@@ -378,15 +381,91 @@ async def analyze_audio(file: UploadFile = File(...)):
             )
 
         duration = len(y) / sr
-        tempo, beat_frames = librosa.beat.beat_track(y=y, sr=sr)
-        rms = librosa.feature.rms(y=y)[0]
+
+        tempo, beat_frames = librosa.beat.beat_track(
+            y=y,
+            sr=sr,
+        )
+
+        hop_length = 512
+        frame_length = 2048
+
+        # Frame-by-frame audio energy.
+        rms = librosa.feature.rms(
+            y=y,
+            frame_length=frame_length,
+            hop_length=hop_length,
+        )[0]
+
+        # Frame-by-frame onset strength.
+        onset = librosa.onset.onset_strength(
+            y=y,
+            sr=sr,
+            hop_length=hop_length,
+        )
+
+        # Calculate separate timestamps because the feature arrays
+        # may not have exactly the same number of frames.
+        rms_times = librosa.frames_to_time(
+            np.arange(len(rms)),
+            sr=sr,
+            hop_length=hop_length,
+        )
+
+        onset_times = librosa.frames_to_time(
+            np.arange(len(onset)),
+            sr=sr,
+            hop_length=hop_length,
+        )
+
+        # Three-second windows, advancing every second.
+        window_seconds = 3.0
+        step_seconds = 1.0
+        window_features = []
+
+        start = 0.0
+
+        while start < duration:
+            end = min(start + window_seconds, duration)
+
+            rms_mask = (
+                (rms_times >= start)
+                & (rms_times < end)
+            )
+
+            onset_mask = (
+                (onset_times >= start)
+                & (onset_times < end)
+            )
+
+            energy = (
+                float(np.mean(rms[rms_mask]))
+                if np.any(rms_mask)
+                else 0.0
+            )
+
+            onset_strength = (
+                float(np.mean(onset[onset_mask]))
+                if np.any(onset_mask)
+                else 0.0
+            )
+
+            window_features.append({
+                "start_seconds": round(float(start), 2),
+                "end_seconds": round(float(end), 2),
+                "energy": round(energy, 4),
+                "onset_strength": round(onset_strength, 4),
+            })
+
+            start += step_seconds
 
         return {
             "filename": file.filename,
             "duration_seconds": round(float(duration), 2),
-            "tempo_bpm": round(float(tempo.item()), 2),
+            "tempo_bpm": round(float(np.asarray(tempo).item()), 2),
             "beat_count": int(len(beat_frames)),
             "rms_mean": round(float(rms.mean()), 4),
+            "window_features": window_features,
             "mode": "analysis_only",
             "message": "Audio features extracted successfully",
         }
@@ -403,7 +482,6 @@ async def analyze_audio(file: UploadFile = File(...)):
             os.remove(temp_path)
 
         await file.close()
-
 
 
 @app.post("/detect-gesture")
@@ -441,7 +519,6 @@ async def detect_gesture(file: UploadFile = File(...)):
         )
     finally:
         await file.close()
-
 
 
 @app.post("/analyze-audience")

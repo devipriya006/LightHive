@@ -58,9 +58,17 @@ async function fetchLightingState() {
     console.error("Python API error:", error);
   }
 }
+useEffect(() => {
+  fetchLightingState();
+}, []);
 
   
 const [audioAnalysis, setAudioAnalysis] = useState(null);
+const [windowFeatures, setWindowFeatures] = useState([]);
+const lastLightingKeyRef = useRef("");
+const songPaletteRef = useRef([]);
+const lastLightingChangeRef = useRef(-1e6);
+const lastFeatureScoreRef = useRef(null);
 const [audioStatus, setAudioStatus] = useState("No song analyzed");
 useEffect(() => {
   if (!track) {
@@ -90,6 +98,40 @@ setTrack(file);
 setBeatData(null);
 setAudioAnalysis(null);
 setAudioStatus("Analysing song...");
+setWindowFeatures([]);
+lastLightingKeyRef.current = "";
+lastLightingChangeRef.current = -1e6;
+lastFeatureScoreRef.current = null;
+songPaletteRef.current = [];
+
+const windowForm = new FormData();
+windowForm.append("file", file)
+
+try {
+  const windowResponse = await fetch(
+    "http://127.0.0.1:8000/analyze",
+    {
+      method: "POST",
+      body: windowForm,
+    }
+  );
+
+  const windowResult = await windowResponse.json();
+
+  if (!windowResponse.ok) {
+    throw new Error(
+      windowResult.detail || "Window analysis failed"
+    );
+  }
+
+  setWindowFeatures(windowResult.window_features ?? []);
+} catch (error) {
+  console.error("Window analysis error:", error);
+  setWindowFeatures([]);
+  setAudioStatus(error.message || "Window analysis failed");
+}
+
+
 
   const formData = new FormData();
   formData.append("file", file);
@@ -154,17 +196,24 @@ if (arousal >= 0.45) {
 } else {
   predictedMood = "DREAMY";
 }
+songPaletteRef.current = shufflePalette(
+  LIGHTING_PALETTES[predictedMood] ||
+    LIGHTING_PALETTES.DREAMY
+);
 
+lastLightingKeyRef.current = "";
+lastLightingChangeRef.current = -1e6;
+lastFeatureScoreRef.current = null;
+
+setMood(predictedMood);
 const moodColors = {
   CALM: "#2DD4BF",
-  DREAMY: "#818CF8",
+  DREAMY: "#343540",
   ENERGETIC: "#A855F7",
   INTENSE: "#FF0000",
 };
-console.log("Mood debug:", { valence, arousal, predictedMood });
-setMood(predictedMood);
-setColor(moodColors[predictedMood]);
 
+setColor(moodColors[predictedMood] || "#343540");
 setAudioAnalysis(result);
 setAudioStatus("AI mood and lighting applied successfully!");
 
@@ -501,6 +550,128 @@ setPoseLandmarks(smoothed);
     poseScanInProgress.current = false;
   }
 }
+
+
+const LIGHTING_PALETTES = {
+  CALM: [
+    "#123B5D", "#0F766E", "#D6C6A8", "#5271A5", "#8AA6A3",
+  ],
+  DREAMY: [
+    "#514878", "#276678", "#D9B8A7", "#A88FAC", "#B8CDBA",
+  ],
+  ENERGETIC: [
+    "#FF5A36", "#2878B5", "#F4B942", "#8A42C8", "#22A699",
+  ],
+  INTENSE: [
+    "#D62828", "#147DF5", "#FF6B00", "#F72585", "#E6E6E6",
+  ],
+};
+
+
+
+function shufflePalette(palette) {
+  const result = [...palette];
+
+  for (let i = result.length - 1; i > 0; i--) {
+    const j = Math.floor(Math.random() * (i + 1));
+    [result[i], result[j]] = [result[j], result[i]];
+  }
+
+  return result;
+}
+
+function updateLightingFromSong(currentTime) {
+  if (
+    !windowFeatures.length ||
+    autoLightingPaused ||
+    climaxActive ||
+    fullRevealActive ||
+    cameraMode === "audience"
+  ) {
+    return;
+  }
+
+  const activeWindow = windowFeatures
+    .filter(
+      (w) =>
+        currentTime >= Number(w.start_seconds) &&
+        currentTime < Number(w.end_seconds)
+    )
+    .at(-1);
+
+  if (!activeWindow) return;
+
+  const energy = Math.max(0, Number(activeWindow.energy) || 0);
+  const onset = Math.max(
+    0,
+    Number(activeWindow.onset_strength) || 0
+  );
+
+  const maxEnergy = Math.max(
+    0.001,
+    ...windowFeatures.map((w) => Number(w.energy) || 0)
+  );
+
+  const maxOnset = Math.max(
+    0.001,
+    ...windowFeatures.map(
+      (w) => Number(w.onset_strength) || 0
+    )
+  );
+
+  const energyLevel = Math.min(1, energy / maxEnergy);
+  const rhythmLevel = Math.min(1, onset / maxOnset);
+
+  // Overall musical activity, not a time-based color sequence.
+  const featureScore =
+    energyLevel * 0.7 + rhythmLevel * 0.3;
+
+  const palette =
+    songPaletteRef.current.length > 0
+      ? songPaletteRef.current
+      : LIGHTING_PALETTES[mood] || LIGHTING_PALETTES.DREAMY;
+
+  const now = Number(currentTime) || 0;
+  const previousScore = lastFeatureScoreRef.current;
+  const scoreChange =
+    previousScore === null
+      ? 0
+      : Math.abs(featureScore - previousScore);
+
+  // Avoid excessive updates from tiny audio fluctuations.
+  const cooldownSeconds = 2.5;
+  const meaningfulChange = scoreChange >= 0.18;
+  const initialChange = lastLightingChangeRef.current < 0;
+
+  if (
+    initialChange ||
+    (now - lastLightingChangeRef.current >= cooldownSeconds &&
+      meaningfulChange)
+  ) {
+    const colorIndex = Math.min(
+      palette.length - 1,
+      Math.floor(featureScore * palette.length)
+    );
+
+    const nextColor = palette[colorIndex];
+
+    if (nextColor !== lastLightingKeyRef.current) {
+      setColor(nextColor);
+      lastLightingKeyRef.current = nextColor;
+      lastLightingChangeRef.current = now;
+    }
+  }
+
+  lastFeatureScoreRef.current = featureScore;
+
+  // Brightness reacts continuously to energy and rhythmic activity.
+  const nextIntensity = Math.round(
+    20 + energyLevel * 55 + rhythmLevel * 25
+  );
+
+  setIntensity(Math.max(15, Math.min(100, nextIntensity)));
+}
+
 useEffect(() => {
   if (
     cameraMode !== "performer" ||
@@ -693,7 +864,9 @@ async function togglePlayback() {
       setBeatPulse(false);
     }}
     onTimeUpdate={(event) => {
-      const beats = beatData?.beat_times_seconds;
+    updateLightingFromSong(event.currentTarget.currentTime);
+
+  const beats = beatData?.beat_times_seconds;
 
       if (!beats?.length) {
         setBeatPulse(false);
@@ -738,10 +911,10 @@ async function togglePlayback() {
     <p>Valence: {audioAnalysis.valence?.toFixed(3)}</p>
     <p>Arousal: {audioAnalysis.arousal?.toFixed(3)}</p>
     <p>
-      RGB: {audioAnalysis.lighting.rgb.r},{" "}
-      {audioAnalysis.lighting.rgb.g},{" "}
-      {audioAnalysis.lighting.rgb.b}
-    </p>
+  RGB: {audioAnalysis.lighting?.rgb
+    ? `${audioAnalysis.lighting.rgb.r}, ${audioAnalysis.lighting.rgb.g}, ${audioAnalysis.lighting.rgb.b}`
+    : "Unavailable"}
+</p>
   </div>
 )}
 
@@ -1042,9 +1215,6 @@ async function togglePlayback() {
     </p>
   </>
 )}
-{cameraError && <p className="camera-error">{cameraError}</p>}
-
-
  
 <p className="camera-description">
   {cameraMode === "performer"
