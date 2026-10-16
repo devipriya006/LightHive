@@ -263,48 +263,95 @@ async function analyzeGestureFrame() {
       throw new Error(result.detail || "Gesture detection failed");
     }
     
+    if (result.pause_active === true) {
+  setAutoLightingPaused(true);
+  setClimaxActive(false);
+  setFullRevealActive(false);
+  setSpotlightDirection(null);
+  setGestureAction("Automatic lighting paused");
+  setGestureStatus("Auto Pause active");
+  setDetectedGesture({ event: "PAUSE_AUTO" });
+  return;
+}
+if (result.pause_active === false) {
+  setAutoLightingPaused(false);
+}
 
 
+const gesture = result.detected;
+const eventName =
+  typeof gesture === "string"
+    ? gesture
+    : gesture?.event ?? result.event ?? null;
 
+// PAUSE_AUTO has the highest priority
+if (result.pause_active === true || eventName === "PAUSE_AUTO") {
+  setAutoLightingPaused(true);
+  setClimaxActive(false);
+  setFullRevealActive(false);
+  setSpotlightDirection(null);
+  setGestureAction("Automatic lighting paused");
+  setGestureStatus("Auto Pause active");
+  setDetectedGesture({ event: "PAUSE_AUTO" });
+  return;
+}
 
-if (result.detected) {
-  const gesture = result.detected;
-  const eventName =
-    typeof gesture === "string" ? gesture : gesture.event;
+// Resume automatic lighting when the palm closes or disappears
+setAutoLightingPaused(false);
 
-  setDetectedGesture(gesture);
+if (eventName) {
+  setDetectedGesture({
+    event: eventName,
+    direction: result.direction ?? gesture?.direction ?? null,
+  });
   setGestureStatus("Gesture detected");
 
-  if (eventName === "PAUSE_AUTO") {
-    setAutoLightingPaused(true);
-    setGestureAction("Automatic lighting paused");
-    setClimaxActive(false);
-    setFullRevealActive(false);
-  } else if (eventName === "CLIMAX") {
-    setAutoLightingPaused(false);
+  if (eventName === "CLIMAX") {
     setClimaxActive(true);
     setFullRevealActive(false);
+    setSpotlightDirection(null);
     setColor("#ffffff");
     setIntensity(100);
     setGestureAction("CLIMAX: Dramatic stage flash");
+
   } else if (eventName === "FULL_STAGE_REVEAL") {
-    setAutoLightingPaused(false);
     setClimaxActive(false);
     setFullRevealActive(true);
+    setSpotlightDirection(null);
+    setColor("#ffffff");
     setIntensity(100);
     setGestureAction("FULL STAGE REVEAL: All beams active");
+
   } else if (eventName === "SPOTLIGHT_DIRECTION") {
-    setSpotlightDirection(gesture.direction || null);
-    setGestureAction("SPOTLIGHT: Direction updated");
+    setClimaxActive(false);
+    setFullRevealActive(false);
+
+    const direction = result.direction ?? gesture?.direction;
+
+    if (direction) {
+      const angle =
+        Math.atan2(-direction.x, direction.y) * (180 / Math.PI);
+
+      setSpotlightDirection({
+        x: direction.x,
+        y: direction.y,
+        angle: Math.max(-55, Math.min(55, angle)),
+      });
+    }
+
+    setGestureAction("SPOTLIGHT DIRECTION: All beams aligned");
+
   } else {
-    setGestureAction(`Gesture detected: ${eventName || "Unknown"}`);
+    setGestureAction(`Gesture detected: ${eventName}`);
   }
+
 } else {
   setGestureStatus("Scanning for gestures");
 }
 
 
-  } catch (error) {
+
+} catch (error) {
     console.error("Gesture detection error:", error);
     setGestureStatus(error.message || "Analysis error");
   } finally {
@@ -770,15 +817,17 @@ async function togglePlayback() {
          
 <div
   className={`concert-stage ${playing ? "is-playing" : ""} ${
-    beatPulse ? "beat-pulse" : ""
+    beatPulse && !autoLightingPaused ? "beat-pulse" : ""
   } ${climaxActive ? "gesture-climax" : ""} ${
     fullRevealActive ? "gesture-full-reveal" : ""
-  } ${autoLightingPaused ? "auto-lighting-paused" : ""}`}
+  } ${autoLightingPaused ? "auto-lighting-paused" : ""}${
+    spotlightDirection ? "spotlight-active" : ""
+  }`}
   style={{
     "--stage-color": color,
     "--stage-intensity": intensity / 100,
-    "--spotlight-x": `${spotlightDirection?.x ?? 0.5}`,
-    "--spotlight-y": `${spotlightDirection?.y ?? 0.5}`,
+   "--spotlight-x": `${spotlightDirection?.x ?? 0.5}`,
+   "--spotlight-angle": `${spotlightDirection?.angle ?? 0}deg`,
   }}
 >
 

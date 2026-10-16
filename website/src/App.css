@@ -482,37 +482,36 @@ button { cursor: pointer; }
   transform: scale(1.25);
 }
 
-/* Spotlight direction: point the beams toward the selected direction */
+
+/* Spotlight direction: move all beams together */
 .concert-stage .light-beam {
-  transition: filter 100ms ease, opacity 100ms ease, transform 100ms ease;
+  transition: transform 200ms ease, filter 150ms ease, opacity 150ms ease;
 }
 
-.concert-stage .beam-1 {
-  --beam-direction: calc((var(--spotlight-x) - 0.5) * 50deg);
-  transform: rotate(calc(-25deg + var(--beam-direction)));
+.concert-stage .beam-1 { --base-angle: -34deg; }
+.concert-stage .beam-2 { --base-angle: -22deg; }
+.concert-stage .beam-3 { --base-angle: -10deg; }
+.concert-stage .beam-4 { --base-angle: 0deg; }
+.concert-stage .beam-5 { --base-angle: 13deg; }
+.concert-stage .beam-6 { --base-angle: 25deg; }
+.concert-stage .beam-7 { --base-angle: 36deg; }
+
+.concert-stage.spotlight-active .light-beam {
+  animation: none !important;
+  transform: rotate(var(--spotlight-angle, 0deg)) !important;
+  opacity: .95 !important;
+  filter: brightness(1.8);
 }
 
-.concert-stage .beam-2 {
-  transform: rotate(calc(-17deg + (var(--spotlight-x) - 0.5) * 35deg));
+.concert-stage.auto-lighting-paused .light-beam {
+  animation: none !important;
+  transform: rotate(0deg) !important;
+  opacity: 0.9 !important;
+  filter: brightness(1.8) !important;
 }
 
-.concert-stage .beam-3 {
-  transform: rotate(calc(-9deg + (var(--spotlight-x) - 0.5) * 20deg));
+.concert-stage.auto-lighting-paused .ambient-glow {
+  animation: none !important;
+  opacity: 0.65 !important;
+  filter: blur(65px) brightness(1.5);
 }
-
-.concert-stage .beam-4 {
-  transform: rotate(calc((var(--spotlight-x) - 0.5) * 10deg));
-}
-
-.concert-stage .beam-5 {
-  transform: rotate(calc(9deg + (var(--spotlight-x) - 0.5) * 20deg));
-}
-
-.concert-stage .beam-6 {
-  transform: rotate(calc(17deg + (var(--spotlight-x) - 0.5) * 35deg));
-}
-
-.concert-stage .beam-7 {
-  transform: rotate(calc(25deg + (var(--spotlight-x) - 0.5) * 50deg));
-}
-

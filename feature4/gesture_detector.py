@@ -15,39 +15,31 @@ POSE_MODEL = ROOT / "models" / "feature4" / "pose_landmarker_lite.task"
 
 
 class GestureDetector:
-    """
-    Feature 4 gestures:
-      Open palm       -> PAUSE_AUTO
-      Both hands up   -> CLIMAX
-      Point direction -> SPOTLIGHT_DIRECTION
-      Arms spread     -> FULL_STAGE_REVEAL
-    """
+    """Detect Auto Pause, Climax, Spotlight Direction and Full Stage Reveal."""
 
     def __init__(self):
         for path in (HAND_MODEL, POSE_MODEL):
             if not path.is_file():
                 raise FileNotFoundError(f"Model file not found: {path}")
 
-        hand_options = vision.GestureRecognizerOptions(
-            base_options=python.BaseOptions(
-                model_asset_path=str(HAND_MODEL)
-            ),
-            running_mode=vision.RunningMode.VIDEO,
-            num_hands=2,
-        )
         self.hands = vision.GestureRecognizer.create_from_options(
-            hand_options
+            vision.GestureRecognizerOptions(
+                base_options=python.BaseOptions(
+                    model_asset_path=str(HAND_MODEL)
+                ),
+                running_mode=vision.RunningMode.VIDEO,
+                num_hands=2,
+            )
         )
 
-        pose_options = vision.PoseLandmarkerOptions(
-            base_options=python.BaseOptions(
-                model_asset_path=str(POSE_MODEL)
-            ),
-            running_mode=vision.RunningMode.VIDEO,
-            num_poses=1,
-        )
         self.pose = vision.PoseLandmarker.create_from_options(
-            pose_options
+            vision.PoseLandmarkerOptions(
+                base_options=python.BaseOptions(
+                    model_asset_path=str(POSE_MODEL)
+                ),
+                running_mode=vision.RunningMode.VIDEO,
+                num_poses=1,
+            )
         )
 
         self.last_timestamp = 0
@@ -55,27 +47,21 @@ class GestureDetector:
         self.pose_frames = 0
         self.last_event = None
         self.direction_last_sent = 0.0
+        self.pause_active = False
 
     @staticmethod
     def _visible(landmark, threshold=0.50):
         return getattr(landmark, "visibility", 1.0) >= threshold
 
     def _get_pose(self, rgb, timestamp):
-        image = mp.Image(
-            image_format=mp.ImageFormat.SRGB,
-            data=rgb,
-        )
+        image = mp.Image(image_format=mp.ImageFormat.SRGB, data=rgb)
         return self.pose.detect_for_video(image, timestamp)
 
     def _get_hands(self, rgb, timestamp):
-        image = mp.Image(
-            image_format=mp.ImageFormat.SRGB,
-            data=rgb,
-        )
+        image = mp.Image(image_format=mp.ImageFormat.SRGB, data=rgb)
         return self.hands.recognize_for_video(image, timestamp)
 
     def _classify_pose(self, landmarks):
-        # MediaPipe Pose landmark indices.
         nose = landmarks[0]
         left_shoulder = landmarks[11]
         right_shoulder = landmarks[12]
@@ -90,37 +76,23 @@ class GestureDetector:
             left_wrist, right_wrist,
         ]
 
-        if not all(self._visible(p) for p in required):
+        if not all(self._visible(point) for point in required):
             return None, None
 
         shoulder_width = max(
-            abs(right_shoulder.x - left_shoulder.x),
-            0.08,
+            abs(right_shoulder.x - left_shoulder.x), 0.08
         )
 
-        # --------------------------------------------------
-        # 1. CLIMAX: both wrists clearly above the head.
-        # This is checked before pointing.
-        # --------------------------------------------------
-        head_y = min(
-            nose.y,
-            left_shoulder.y,
-            right_shoulder.y,
-        )
+        # CLIMAX: both wrists are clearly above the head.
+        head_y = min(nose.y, left_shoulder.y, right_shoulder.y)
 
-        both_hands_up = (
+        if (
             left_wrist.y < head_y - 0.08
             and right_wrist.y < head_y - 0.08
-        )
-
-        if both_hands_up:
+        ):
             return "CLIMAX", None
 
-        # --------------------------------------------------
-        # 2. FULL_STAGE_REVEAL: both arms extended sideways.
-        # Absolute horizontal distances work with mirrored
-        # and non-mirrored previews.
-        # --------------------------------------------------
+        # FULL_STAGE_REVEAL: both arms extend sideways.
         left_dx = abs(left_wrist.x - left_shoulder.x)
         right_dx = abs(right_wrist.x - right_shoulder.x)
 
@@ -133,20 +105,15 @@ class GestureDetector:
             < shoulder_width * 0.90
         )
 
-        arms_spread = (
+        if (
             left_dx > shoulder_width * 0.90
             and right_dx > shoulder_width * 0.90
             and left_level
             and right_level
-        )
-
-        if arms_spread:
+        ):
             return "FULL_STAGE_REVEAL", None
 
-        # --------------------------------------------------
-        # 3. SPOTLIGHT_DIRECTION: one arm extended.
-        # Do not treat a two-handed overhead pose as pointing.
-        # --------------------------------------------------
+        # SPOTLIGHT_DIRECTION: one arm extends sideways or upward.
         candidates = []
 
         for shoulder, elbow, wrist in (
@@ -160,26 +127,20 @@ class GestureDetector:
             if length < shoulder_width * 1.10:
                 continue
 
-            # A raised hand close to vertical is not enough
-            # by itself to count as pointing.
-            clearly_horizontal = (
+            horizontal = (
                 abs(dx) > shoulder_width * 0.80
                 and abs(dx) > abs(dy) * 0.80
             )
-            clearly_upward = (
+            upward = (
                 dy > shoulder_width * 0.65
                 and dy > abs(dx) * 0.60
             )
 
-            if clearly_horizontal or clearly_upward:
+            if horizontal or upward:
                 candidates.append((dx, dy, length))
 
         if candidates:
-            dx, dy, length = max(
-                candidates,
-                key=lambda item: item[2],
-            )
-
+            dx, dy, length = max(candidates, key=lambda item: item[2])
             return "SPOTLIGHT_DIRECTION", {
                 "x": round(dx / length, 3),
                 "y": round(dy / length, 3),
@@ -188,19 +149,10 @@ class GestureDetector:
         return None, None
 
     def detect(self, frame):
-        """
-        Returns an event dictionary or None.
-
-        Static gestures require four stable frames.
-        Spotlight direction is emitted repeatedly while pointing.
-        """
         now = time.monotonic()
         rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
 
-        timestamp = max(
-            int(now * 1000),
-            self.last_timestamp + 1,
-        )
+        timestamp = max(int(now * 1000), self.last_timestamp + 1)
         self.last_timestamp = timestamp
 
         pose_result = self._get_pose(rgb, timestamp)
@@ -214,43 +166,39 @@ class GestureDetector:
                 pose_result.pose_landmarks[0]
             )
 
-        # Recognize open palm only when the hand classifier
-        # has sufficient confidence.
-        open_palm = False
+        # One detected open palm is enough to pause.
+        one_hand_open = False
 
         if hand_result.gestures:
             for categories in hand_result.gestures:
-                if not categories:
-                    continue
-
-                category = categories[0]
-
-                if (
+                if any(
                     category.category_name == "Open_Palm"
                     and category.score >= 0.70
+                    for category in categories
                 ):
-                    open_palm = True
+                    one_hand_open = True
                     break
 
-        # Explicit priority:
-        # 1. Two-arm stage poses
-        # 2. Directional pointing
-        # 3. Open-palm pause
-        if pose_name in ("CLIMAX", "FULL_STAGE_REVEAL"):
-            current = pose_name
-        elif pose_name == "SPOTLIGHT_DIRECTION":
-            current = pose_name
-        elif open_palm:
-            current = "PAUSE_AUTO"
-        else:
-            current = None
+        # Highest priority: PAUSE_AUTO overrides every pose gesture.
+        self.pause_active = one_hand_open
 
-        # Spotlight direction is continuous, but only while
-        # the pose classifier reports pointing.
-        if current == "SPOTLIGHT_DIRECTION" and direction:
-            self.active_pose = current
+        if self.pause_active:
+            self.active_pose = None
             self.pose_frames = 0
-            self.last_event = current
+            self.last_event = None
+
+            return {
+                "type": "GESTURE_STATE",
+                "event": "PAUSE_AUTO",
+                "pause_active": True,
+                "direction": None,
+            }
+
+        # The palm has closed or is no longer detected. Resume processing.
+        if pose_name == "SPOTLIGHT_DIRECTION" and direction:
+            self.active_pose = pose_name
+            self.pose_frames = 0
+            self.last_event = pose_name
 
             if now - self.direction_last_sent >= 0.10:
                 self.direction_last_sent = now
@@ -258,36 +206,57 @@ class GestureDetector:
                     "type": "GESTURE_EVENT",
                     "event": "SPOTLIGHT_DIRECTION",
                     "direction": direction,
+                    "pause_active": False,
                 }
 
-            return None
+            return {
+                "type": "GESTURE_STATE",
+                "event": None,
+                "direction": direction,
+                "pause_active": False,
+            }
 
-        # Reset after releasing a gesture.
-        if current is None:
+        if pose_name is None:
             self.active_pose = None
             self.pose_frames = 0
             self.last_event = None
-            return None
 
-        # Require four consecutive frames for static gestures.
-        if current == self.active_pose:
+            return {
+                "type": "GESTURE_STATE",
+                "event": None,
+                "direction": None,
+                "pause_active": False,
+            }
+
+        if pose_name == self.active_pose:
             self.pose_frames += 1
         else:
-            self.active_pose = current
+            self.active_pose = pose_name
             self.pose_frames = 1
 
         if self.pose_frames < 4:
-            return None
+            return {
+                "type": "GESTURE_STATE",
+                "event": None,
+                "direction": None,
+                "pause_active": False,
+            }
 
-        # Emit each static gesture only once while held.
-        if current == self.last_event:
-            return None
+        if pose_name == self.last_event:
+            return {
+                "type": "GESTURE_STATE",
+                "event": None,
+                "direction": None,
+                "pause_active": False,
+            }
 
-        self.last_event = current
+        self.last_event = pose_name
 
         return {
             "type": "GESTURE_EVENT",
-            "event": current,
+            "event": pose_name,
+            "direction": None,
+            "pause_active": False,
         }
 
     def close(self):

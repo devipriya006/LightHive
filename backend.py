@@ -1,25 +1,27 @@
-﻿import os
+﻿
+import os
 import tempfile
 import librosa
 import cv2
-from feature4.gesture_detector import GestureDetector
-from pathlib import Path
-from fastapi import UploadFile, File, HTTPException
-from fastapi import FastAPI
-from fastapi.middleware.cors import CORSMiddleware
-from pydantic import BaseModel
 import json
 import numpy as np
-from feature1.audio_features import extract_audio_features, load_clap_model
-from feature3.audience_energy import AudienceEnergyAnalyzer
-from feature2.predict import predict_features
-from feature2.beat_detector import detect_beats
 import mediapipe as mp
 
+from pathlib import Path
+from fastapi import UploadFile, File, HTTPException, FastAPI
+from fastapi.middleware.cors import CORSMiddleware
+from pydantic import BaseModel
+
+from feature1.audio_features import extract_audio_features, load_clap_model
+from feature2.predict import predict_features
+from feature2.beat_detector import detect_beats
 from feature2.lighting_mapper import (
     create_lighting_state,
     lighting_state_to_dict,
 )
+from feature3.audience_energy import AudienceEnergyAnalyzer
+from feature4.gesture_detector import GestureDetector
+
 
 app = FastAPI(title="LightHive API")
 
@@ -41,16 +43,17 @@ AUDIENCE_ANALYZER = None
 
 @app.on_event("startup")
 def startup_event():
-    global CLAP_MODEL, GESTURE_DETECTOR, POSE_TRACKER,AUDIENCE_ANALYZER
+    global CLAP_MODEL, GESTURE_DETECTOR, POSE_TRACKER, AUDIENCE_ANALYZER
 
     CLAP_MODEL = load_clap_model()
     GESTURE_DETECTOR = GestureDetector()
+
     AUDIENCE_ANALYZER = AudienceEnergyAnalyzer(
-    model_path="yolo11n-pose.pt",
-    image_size=416,
-    max_people=10,
-    device="cpu",
-)
+        model_path="yolo11n-pose.pt",
+        image_size=416,
+        max_people=10,
+        device="cpu",
+    )
 
     POSE_TRACKER = mp.solutions.pose.Pose(
         static_image_mode=False,
@@ -61,21 +64,37 @@ def startup_event():
     )
 
 
+@app.on_event("shutdown")
+def shutdown_event():
+    global GESTURE_DETECTOR, POSE_TRACKER
+
+    if GESTURE_DETECTOR is not None:
+        GESTURE_DETECTOR.close()
+        GESTURE_DETECTOR = None
+
+    if POSE_TRACKER is not None:
+        POSE_TRACKER.close()
+        POSE_TRACKER = None
+
+
 class LightingInput(BaseModel):
     valence: float = 0.0
     arousal: float = 0.0
     audience_energy: float = 0.0
     beat: bool = False
 
+
 @app.get("/")
 def home():
     return {"message": "LightHive API is running"}
+
 
 @app.get("/state")
 def get_state():
     state = lighting_state_to_dict(
         create_lighting_state(0.0, 0.0)
     )
+
     state.update({
         "valence": 0.0,
         "arousal": 0.0,
@@ -83,13 +102,16 @@ def get_state():
         "beat": False,
         "mode": "preview",
     })
+
     return state
+
 
 @app.post("/state")
 def update_state(data: LightingInput):
     state = lighting_state_to_dict(
         create_lighting_state(data.valence, data.arousal)
     )
+
     state.update({
         "valence": data.valence,
         "arousal": data.arousal,
@@ -97,22 +119,27 @@ def update_state(data: LightingInput):
         "beat": data.beat,
         "mode": "preview",
     })
+
     return state
 
 
 def build_model_features(audio_path):
-    """Build model inputs in the exact order recorded in training metadata."""
-    metadata_path = Path(__file__).resolve().parent / "models" / "feature2" / "training_metadata.json"
+    """Build model inputs in the feature order used during training."""
+    metadata_path = (
+        Path(__file__).resolve().parent
+        / "models"
+        / "feature2"
+        / "training_metadata.json"
+    )
 
-    with open(metadata_path, "r", encoding="utf-8") as f:
-        metadata = json.load(f)
+    with open(metadata_path, "r", encoding="utf-8") as file:
+        metadata = json.load(file)
 
     classical = extract_audio_features(Path(audio_path))
     classical.pop("song_id", None)
 
     values = {}
 
-    # Match feature2/dataset.py's classical feature flattening.
     for key, value in classical.items():
         if isinstance(value, list):
             numeric = np.asarray(value, dtype=np.float32)
@@ -121,7 +148,6 @@ def build_model_features(audio_path):
         else:
             values[key] = float(value)
 
-    # Generate the 512-dimensional CLAP embedding.
     embedding = CLAP_MODEL.get_audio_embedding_from_filelist(
         x=[str(audio_path)],
         use_tensor=False,
@@ -152,33 +178,42 @@ def build_model_features(audio_path):
 
     return vector
 
+
 @app.post("/predict-lighting")
 async def predict_lighting(file: UploadFile = File(...)):
     if not file.filename:
-        raise HTTPException(status_code=400, detail="No file selected")
+        raise HTTPException(
+            status_code=400,
+            detail="No file selected",
+        )
 
     extension = Path(file.filename).suffix.lower()
     allowed_extensions = {".mp3", ".wav", ".ogg", ".flac", ".m4a"}
 
     if extension not in allowed_extensions:
-        raise HTTPException(status_code=400, detail="Unsupported audio format")
+        raise HTTPException(
+            status_code=400,
+            detail="Unsupported audio format",
+        )
 
     temp_path = None
 
     try:
-        with tempfile.NamedTemporaryFile(suffix=extension, delete=False) as temp:
+        with tempfile.NamedTemporaryFile(
+            suffix=extension,
+            delete=False,
+        ) as temp:
             temp_path = temp.name
+
             while chunk := await file.read(1024 * 1024):
                 temp.write(chunk)
 
-        # Extract features and predict emotions.
         features = build_model_features(temp_path)
         prediction = predict_features(features)
 
         valence = prediction["valence_mean"]
         arousal = prediction["arousal_mean"]
 
-        # Convert predicted emotions into lighting values.
         state = lighting_state_to_dict(
             create_lighting_state(valence, arousal)
         )
@@ -201,7 +236,9 @@ async def predict_lighting(file: UploadFile = File(...)):
     finally:
         if temp_path and os.path.exists(temp_path):
             os.remove(temp_path)
+
         await file.close()
+
 
 @app.post("/detect-beats")
 async def detect_beats_endpoint(file: UploadFile = File(...)):
@@ -209,19 +246,27 @@ async def detect_beats_endpoint(file: UploadFile = File(...)):
     temp_path = None
 
     try:
-        with tempfile.NamedTemporaryFile(delete=False, suffix=suffix) as temp_file:
+        with tempfile.NamedTemporaryFile(
+            delete=False,
+            suffix=suffix,
+        ) as temp_file:
             temp_file.write(await file.read())
             temp_path = Path(temp_file.name)
 
-        result = detect_beats(temp_path)
-        return result
+        return detect_beats(temp_path)
 
     except (ValueError, FileNotFoundError) as exc:
-        raise HTTPException(status_code=400, detail=str(exc))
-
+        raise HTTPException(
+            status_code=400,
+            detail=str(exc),
+        )
     finally:
         if temp_path is not None:
             temp_path.unlink(missing_ok=True)
+
+        await file.close()
+
+
 @app.post("/detect-pose")
 async def detect_pose(file: UploadFile = File(...)):
     if POSE_TRACKER is None:
@@ -245,7 +290,10 @@ async def detect_pose(file: UploadFile = File(...)):
         result = POSE_TRACKER.process(rgb_frame)
 
         if not result.pose_landmarks:
-            return {"detected": False, "landmarks": None}
+            return {
+                "detected": False,
+                "landmarks": None,
+            }
 
         landmarks = result.pose_landmarks.landmark
 
@@ -284,12 +332,17 @@ async def detect_pose(file: UploadFile = File(...)):
             status_code=500,
             detail=f"Pose detection failed: {exc}",
         )
+    finally:
+        await file.close()
 
 
 @app.post("/analyze")
 async def analyze_audio(file: UploadFile = File(...)):
     if not file.filename:
-        raise HTTPException(status_code=400, detail="No file selected")
+        raise HTTPException(
+            status_code=400,
+            detail="No file selected",
+        )
 
     allowed_extensions = {".mp3", ".wav", ".ogg", ".flac", ".m4a"}
     extension = Path(file.filename).suffix.lower()
@@ -297,30 +350,35 @@ async def analyze_audio(file: UploadFile = File(...)):
     if extension not in allowed_extensions:
         raise HTTPException(
             status_code=400,
-            detail="Unsupported audio format"
+            detail="Unsupported audio format",
         )
 
     temp_path = None
 
     try:
         with tempfile.NamedTemporaryFile(
-            suffix=extension, delete=False
+            suffix=extension,
+            delete=False,
         ) as temp:
             temp_path = temp.name
+
             while chunk := await file.read(1024 * 1024):
                 temp.write(chunk)
 
-        y, sr = librosa.load(temp_path, sr=22050, mono=True)
+        y, sr = librosa.load(
+            temp_path,
+            sr=22050,
+            mono=True,
+        )
 
         if len(y) == 0:
             raise HTTPException(
-                status_code=400, detail="Audio file is empty"
+                status_code=400,
+                detail="Audio file is empty",
             )
 
         duration = len(y) / sr
-        tempo, beat_frames = librosa.beat.beat_track(
-            y=y, sr=sr
-        )
+        tempo, beat_frames = librosa.beat.beat_track(y=y, sr=sr)
         rms = librosa.feature.rms(y=y)[0]
 
         return {
@@ -330,7 +388,7 @@ async def analyze_audio(file: UploadFile = File(...)):
             "beat_count": int(len(beat_frames)),
             "rms_mean": round(float(rms.mean()), 4),
             "mode": "analysis_only",
-            "message": "Audio features extracted successfully"
+            "message": "Audio features extracted successfully",
         }
 
     except HTTPException:
@@ -338,13 +396,16 @@ async def analyze_audio(file: UploadFile = File(...)):
     except Exception as exc:
         raise HTTPException(
             status_code=422,
-            detail=f"Audio analysis failed: {str(exc)}"
+            detail=f"Audio analysis failed: {str(exc)}",
         )
     finally:
         if temp_path and os.path.exists(temp_path):
             os.remove(temp_path)
+
         await file.close()
-        
+
+
+
 @app.post("/detect-gesture")
 async def detect_gesture(file: UploadFile = File(...)):
     if GESTURE_DETECTOR is None:
@@ -364,13 +425,24 @@ async def detect_gesture(file: UploadFile = File(...)):
         )
 
     try:
-        event = GESTURE_DETECTOR.detect(frame)
-        return {"detected": event}
+        result = GESTURE_DETECTOR.detect(frame)
+
+        return {
+            "type": result.get("type"),
+            "detected": result.get("event"),
+            "pause_active": result.get("pause_active", False),
+            "direction": result.get("direction"),
+        }
+
     except Exception as exc:
         raise HTTPException(
             status_code=500,
             detail=f"Gesture detection failed: {exc}",
         )
+    finally:
+        await file.close()
+
+
 
 @app.post("/analyze-audience")
 async def analyze_audience(file: UploadFile = File(...)):
@@ -393,6 +465,7 @@ async def analyze_audience(file: UploadFile = File(...)):
     try:
         _, payload = AUDIENCE_ANALYZER.update(frame)
         return payload
+
     except Exception as exc:
         raise HTTPException(
             status_code=500,
@@ -400,5 +473,3 @@ async def analyze_audience(file: UploadFile = File(...)):
         )
     finally:
         await file.close()
-
-
