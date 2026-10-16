@@ -140,16 +140,33 @@ setAudioStatus("Analysing song...");
       Math.round((result.lighting.brightness ?? 0.6) * 100)
     );
 
-    const predictedMood =
-      result.valence > 0.35
-        ? "ENERGETIC"
-        : result.valence < -0.35
-          ? "DREAMY"
-          : "CALM";
+    const valence = Number(result.valence ?? 0);
+const arousal = Number(result.arousal ?? 0);
 
-    setMood(predictedMood);
-    setAudioAnalysis(result);
-    setAudioStatus("AI lighting applied successfully!");
+let predictedMood;
+
+if (arousal >= 0.45) {
+  predictedMood = valence < -0.2 ? "INTENSE" : "ENERGETIC";
+} else if (valence < -0.2) {
+  predictedMood = "DREAMY";
+} else if (arousal < 0.35 && valence >= 0) {
+  predictedMood = "CALM";
+} else {
+  predictedMood = "DREAMY";
+}
+
+const moodColors = {
+  CALM: "#2DD4BF",
+  DREAMY: "#818CF8",
+  ENERGETIC: "#A855F7",
+  INTENSE: "#FF0000",
+};
+console.log("Mood debug:", { valence, arousal, predictedMood });
+setMood(predictedMood);
+setColor(moodColors[predictedMood]);
+
+setAudioAnalysis(result);
+setAudioStatus("AI mood and lighting applied successfully!");
 
   } catch (error) {
     console.error("Lighting prediction error:", error);
