@@ -515,3 +515,95 @@ button { cursor: pointer; }
   opacity: 0.65 !important;
   filter: blur(65px) brightness(1.5);
 }
+
+/* LightHive — improved font readability */
+body,
+.app-shell {
+  color: #f1f5f9;
+}
+
+.app-shell p,
+.app-shell label,
+.app-shell span,
+.app-shell h1,
+.app-shell h2,
+.app-shell h3 {
+  color: #e2e8f0;
+}
+
+.app-shell .eyebrow,
+.app-shell .section-label,
+.app-shell .metric-label {
+  color: #a5b4fc;
+}
+
+.app-shell .camera-description,
+.app-shell .camera-status,
+.app-shell .intro,
+.app-shell .metric-note {
+  color: #f4f5f3;
+}
+
+.app-shell button {
+  color: #ffffff;
+}
+
+.app-shell input,
+.app-shell select,
+.app-shell textarea {
+  color: #d9e0e7;
+}
+
+/* LightHive — larger, readable typography */
+.app-shell {
+  font-size: 17px;
+}
+
+.app-shell p,
+.app-shell label,
+.app-shell input,
+.app-shell select,
+.app-shell textarea {
+  font-size: 16px;
+  line-height: 1.7;
+}
+
+.app-shell .intro,
+.app-shell .camera-description,
+.app-shell .camera-status,
+.app-shell .metric-note {
+  font-size: 16px;
+  line-height: 1.8;
+}
+
+.app-shell .section-label,
+.app-shell .metric-label,
+.app-shell .eyebrow {
+  font-size: 14px;
+  letter-spacing: 1.2px;
+}
+
+.app-shell button {
+  font-size: 16px;
+}
+
+.app-shell h1 {
+  font-size: 34px;
+}
+
+.app-shell h2 {
+  font-size: 28px;
+}
+
+.app-shell h3 {
+  font-size: 22px;
+}
+
+.app-shell .metric-value {
+  font-size: 25px;
+}
+
+.app-shell .camera-description {
+  margin: 12px 0;
+}
+

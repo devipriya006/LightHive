@@ -951,43 +951,77 @@ async function togglePlayback() {
     </button>
   </div>
   
-<div className="camera-actions">
-  <button
-    className="camera-action"
-    disabled={cameraStatus !== "Camera connected"}
-    onClick={() => {
-      setGestureEnabled((enabled) => !enabled);
-      setGestureStatus(
-        gestureEnabled ? "Detection stopped" : "Starting detection..."
-      );
-    }}
-  >
-    {gestureEnabled ? "Stop Detection" : "Start Detection"}
-  </button>
-</div>
 
-<p className="camera-description">
-  Detection status: {gestureStatus}
-</p>
+{cameraMode === "performer" ? (
+  <>
+    <div className="camera-actions">
+      <button
+        className="camera-action"
+        disabled={cameraStatus !== "Camera connected"}
+        onClick={() => {
+          setGestureEnabled((enabled) => !enabled);
+          setGestureStatus(
+            gestureEnabled
+              ? "Detection stopped"
+              : "Starting detection..."
+          );
+        }}
+      >
+        {gestureEnabled ? "Stop Detection" : "Start Detection"}
+      </button>
+    </div>
 
-<p className="camera-description">
-  Pose tracking: {poseStatus}
-</p>
+    <p className="camera-description">
+      Detection status: {gestureStatus}
+    </p>
 
+    <p className="camera-description">
+      Pose tracking: {poseStatus}
+    </p>
 
-<p className="camera-description">
-  Latest gesture: {detectedGesture?.event || "None detected yet"}
-</p>
-<p className="camera-description">
-  Lighting action: {gestureAction}
-</p>
+    <p className="camera-description">
+      Latest gesture: {detectedGesture?.event || "None detected yet"}
+    </p>
 
-{detectedGesture?.direction && (
-  <p className="camera-description">
-    Spotlight direction: X {detectedGesture.direction.x}, Y{" "}
-    {detectedGesture.direction.y}
-  </p>
+    <p className="camera-description">
+      Lighting action: {gestureAction}
+    </p>
+
+    {detectedGesture?.direction && (
+      <p className="camera-description">
+        Spotlight direction: X {detectedGesture.direction.x},
+        Y {detectedGesture.direction.y}
+      </p>
+    )}
+
+  
+  </>
+) : (
+  <>
+    <p className="camera-description">
+      Audience status: {audienceStatus}
+    </p>
+
+    <p className="camera-description">
+      People detected: {audienceData?.person_count ?? "—"}
+    </p>
+
+    <p className="camera-description">
+      Audience energy: {audienceData
+        ? `${Math.round(audienceData.audience_energy)}/100`
+        : "Waiting for analysis"}
+    </p>
+
+    <p className="camera-description">
+      Activity level: {audienceData?.activity_level ?? "—"}
+    </p>
+
+    <p className="camera-description">
+      Audience analysis mode selected.
+    </p>
+  </>
 )}
+{cameraError && <p className="camera-error">{cameraError}</p>}
 
 
  
@@ -1026,21 +1060,23 @@ async function togglePlayback() {
               <span className="metric-note">RGB visual simulation</span>
             </article>
 
-<article className="metric-card">
-  <span className="metric-label">AUDIENCE ENERGY</span>
+{cameraMode === "audience" && (
+  <article className="metric-card">
+    <span className="metric-label">AUDIENCE ENERGY</span>
 
-  <strong className="metric-value">
-    {audienceData
-      ? Math.round(audienceData.audience_energy)
-      : "—"}
-  </strong>
+    <strong className="metric-value">
+      {audienceData
+        ? Math.round(audienceData.audience_energy)
+        : "—"}
+    </strong>
 
-  <span className="metric-note">
-    {audienceData
-      ? `${audienceData.activity_level} activity · ${audienceData.person_count} people`
-      : audienceStatus}
-  </span>
-</article>
+    <span className="metric-note">
+      {audienceData
+        ? `${audienceData.activity_level} activity · ${audienceData.person_count} people`
+        : audienceStatus}
+    </span>
+  </article>
+)}
 
 
             <article className="metric-card">
