@@ -224,7 +224,9 @@ useEffect(() => {
     cameraStreamRef.current?.getTracks().forEach((track) => track.stop());
   };
 }, []);
+
 async function analyzeGestureFrame() {
+  if (cameraMode !== "performer") return;
   const video = videoRef.current;
 
   if (!video || video.readyState < 2 || scanInProgress.current) {
@@ -407,6 +409,12 @@ async function analyzeAudienceFrame() {
     }
 
     setAudienceData(result);
+    console.log("AUDIENCE ENERGY DEBUG:", {
+  energy: result.audience_energy,
+  people: result.person_count,
+  activity: result.activity_level,
+  details: result.people,
+});
     setAudienceStatus("Audience analysis active");
   } catch (error) {
     console.error("Audience analysis error:", error);
@@ -494,7 +502,14 @@ setPoseLandmarks(smoothed);
   }
 }
 useEffect(() => {
-  if (cameraStatus !== "Camera connected") return;
+  if (
+    cameraMode !== "performer" ||
+    cameraStatus !== "Camera connected"
+  ) {
+    setPoseLandmarks(null);
+    smoothedPoseRef.current = null;
+    return;
+  }
 
   let cancelled = false;
   let timer;
@@ -515,9 +530,13 @@ useEffect(() => {
     cancelled = true;
     clearTimeout(timer);
   };
-}, [cameraStatus]);
+}, [cameraMode, cameraStatus]);
 useEffect(() => {
-  if (!gestureEnabled || cameraStatus !== "Camera connected") {
+  if (
+    cameraMode !== "performer" ||
+    !gestureEnabled ||
+    cameraStatus !== "Camera connected"
+  ) {
     return;
   }
 
@@ -540,7 +559,7 @@ useEffect(() => {
     cancelled = true;
     clearTimeout(timer);
   };
-}, [gestureEnabled, cameraStatus]);
+}, [cameraMode, gestureEnabled, cameraStatus]);
 useEffect(() => {
   if (
     cameraMode !== "audience" ||
@@ -569,33 +588,35 @@ useEffect(() => {
     clearTimeout(timer);
   };
 }, [cameraMode, cameraStatus]);
+
+
 useEffect(() => {
   if (cameraMode !== "audience" || !audienceData) return;
   if (autoLightingPaused || climaxActive) return;
 
-  const energy = Number(audienceData.audience_energy);
-  if (!Number.isFinite(energy)) return;
+  const energy = Math.max(
+    0,
+    Math.min(100, Number(audienceData.audience_energy) || 0)
+  );
 
-  // Adjust these thresholds if your analyzer uses a different scale.
-  if (energy >= 70) {
-    setColor("#ff4d8d");
-    setIntensity(95);
-    setMood("INTENSE");
-  } else if (energy >= 40) {
-    setColor("#f59e0b");
-    setIntensity(75);
-    setMood("ENERGETIC");
-  } else {
-    setColor("#38bdf8");
-    setIntensity(40);
-    setMood("CALM");
-  }
+  // Audience movement controls brightness only.
+  // Preserve the colour selected by the song.
+  const minIntensity = 20;
+  const maxIntensity = 100;
+
+  const audienceIntensity = Math.round(
+    minIntensity + (energy / 100) * (maxIntensity - minIntensity)
+  );
+
+  setIntensity(audienceIntensity);
 }, [
   audienceData,
   cameraMode,
   autoLightingPaused,
   climaxActive,
 ]);
+
+
 
 
 async function togglePlayback() {

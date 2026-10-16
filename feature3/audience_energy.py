@@ -40,7 +40,7 @@ class AudienceEnergyAnalyzer:
         model_path: str = "yolo11n-pose.pt",
         image_size: int = 416,
         max_people: int = 10,
-        smoothing: float = 0.5,
+        smoothing: float = 0.75,
         confidence: float = 0.30,
         device: str = "cpu",
     ) -> None:
@@ -147,7 +147,7 @@ class AudienceEnergyAnalyzer:
                         valid_wrists = keypoint_conf[index, wrist_indices] >= 0.35
 
                     if np.any(valid_wrists):
-                        wrists = pose[wrist_indices][valid_wrists].mean(axis=0)
+                        wrists = pose[wrist_indices][valid_wrists].copy()   
 
                 torso_y: float | None = None
                 if len(pose) >= 13:
@@ -182,15 +182,26 @@ class AudienceEnergyAnalyzer:
                         / body_scale
                         / dt
                     )
-                    body_raw = self._clamp01(center_speed / 0.45)
+                    body_raw = self._clamp01(center_speed / 0.30)
 
-                    if wrists is not None and previous.wrists is not None:
+                    
+                    if (
+                        wrists is not None
+                        and previous.wrists is not None
+                        and wrists.shape == previous.wrists.shape
+                    ):
+                        wrist_displacements = np.linalg.norm(
+                            wrists - previous.wrists, axis=1
+                        )
+
                         wrist_speed = (
-                            float(np.linalg.norm(wrists - previous.wrists))
+                            float(np.mean(wrist_displacements))
                             / body_scale
                             / dt
                         )
-                        hand_raw = self._clamp01(wrist_speed / 0.80)
+
+                        hand_raw = self._clamp01(wrist_speed / 0.25)
+
 
                     if torso_y is not None and previous.torso_y is not None:
                         vertical_speed = (
@@ -198,7 +209,7 @@ class AudienceEnergyAnalyzer:
                             / body_scale
                             / dt
                         )
-                        vertical_raw = self._clamp01(vertical_speed / 0.35)
+                        vertical_raw = self._clamp01(vertical_speed / 0.25)
 
                     body_activity = self._smooth(
                         previous.body_activity, body_raw
