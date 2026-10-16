@@ -40,7 +40,7 @@ class AudienceEnergyAnalyzer:
         model_path: str = "yolo11n-pose.pt",
         image_size: int = 416,
         max_people: int = 10,
-        smoothing: float = 0.25,
+        smoothing: float = 0.5,
         confidence: float = 0.30,
         device: str = "cpu",
     ) -> None:
@@ -210,9 +210,9 @@ class AudienceEnergyAnalyzer:
                         previous.vertical_activity, vertical_raw
                     )
                     activity = (
-                        0.45 * body_activity
-                        + 0.35 * hand_activity
-                        + 0.20 * vertical_activity
+                     0.30 * body_activity
+                    + 0.45 * hand_activity
+                     + 0.25 * vertical_activity
                     )
                     activity = self._smooth(previous.activity, activity)
                 else:

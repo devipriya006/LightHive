@@ -92,7 +92,7 @@ def extract_audio_features(audio_path):
     zcr = librosa.feature.zero_crossing_rate(y)[0]
 
     return {
-        "song_id": int(audio_path.stem),
+        "song_id": int(audio_path.stem) if audio_path.stem.isdigit() else 0,
         "duration_seconds": float(duration),
         "sample_rate": int(sr),
 
